@@ -119,7 +119,7 @@ func (em *EaseMob) GetUser(username string, cb EMCallback) error {
 	return nil
 }
 
-func (em *EaseMob) GetUsers(limit int, cursor string) error {
+func (em *EaseMob) GetUsers(limit int, cursor string, cb EMCallback) error {
 	uri := em.uri() + "/users"
 	var param bool = false
 	if limit != 0 {
