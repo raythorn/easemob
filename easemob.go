@@ -1,12 +1,15 @@
 package easemob
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -389,22 +392,86 @@ func (em *EaseMob) GetMessages(limit int, cursor string, sql string, cb EMCallba
 	return nil
 }
 
+func (em *EaseMob) Upload(file string, cb EMCallback) error {
+	var b bytes.Buffer
+	writer := multipart.NewWriter(&b)
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	formfile, err := writer.CreateFormFile("file", file)
+	if err != nil {
+		return err
+	}
+
+	if _, err = io.Copy(formfile, f); err != nil {
+		return err
+	}
+
+	writer.Close()
+
+	uri := em.uri() + "/chatfiles"
+	client := &http.Client{}
+	req, err := http.NewRequest("POST", uri, &b)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("restrict-access", "true")
+	req.Header.Set("Authorization", "Bearer "+em.token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		errstr := "Unkown Request Error!"
+		var result map[string]interface{} = nil
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			return errors.New(errstr)
+		}
+
+		if _, exist := result["error_description"]; exist {
+			if val, ok := result["error_description"].(string); ok {
+				errstr = val
+			}
+		}
+		return errors.New(errstr)
+	}
+
+	cb(data)
+
+	return nil
+}
+
 func (em *EaseMob) uri() string {
 	return em.host + "/" + em.org + "/" + em.app
 }
 
-func (em *EaseMob) send(method, uri string, data interface{}) (result []byte, err error) {
+func (em *EaseMob) send(method, uri string, data interface{}, header ...map[string]string) (result []byte, err error) {
 
 	var body io.Reader = nil
 
 	if data != nil {
-		bytes, err := json.Marshal(data)
+		b, err := json.Marshal(data)
 		if err != nil {
 			return nil, err
 		}
 
-		fmt.Println(string(bytes))
-		body = strings.NewReader(string(bytes))
+		fmt.Println(string(b))
+		body = strings.NewReader(string(b))
 	}
 
 	client := &http.Client{}
@@ -413,7 +480,7 @@ func (em *EaseMob) send(method, uri string, data interface{}) (result []byte, er
 		return nil, err
 	}
 
-	req.Header.Set("content-type", "application/json;charset=utf-8")
+	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	if em.token != "" && em.auth {
 		req.Header.Set("Authorization", "Bearer "+em.token)
 	}
@@ -424,7 +491,7 @@ func (em *EaseMob) send(method, uri string, data interface{}) (result []byte, er
 	}
 
 	defer resp.Body.Close()
-	bytes, err := ioutil.ReadAll(resp.Body)
+	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +499,7 @@ func (em *EaseMob) send(method, uri string, data interface{}) (result []byte, er
 	if resp.StatusCode >= 400 {
 		errstr := "Unkown Request Error!"
 		var result map[string]interface{} = nil
-		err = json.Unmarshal(bytes, &result)
+		err = json.Unmarshal(b, &result)
 		if err != nil {
 			return nil, errors.New(errstr)
 		}
@@ -445,5 +512,5 @@ func (em *EaseMob) send(method, uri string, data interface{}) (result []byte, er
 		return nil, errors.New(errstr)
 	}
 
-	return bytes, nil
+	return b, nil
 }
